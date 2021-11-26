@@ -44,16 +44,16 @@ class ThreeDMatchDemo(Dataset):
 
     def __getitem__(self,item): 
         # get pointcloud
-        src_pcd = torch.load(self.src_path).astype(np.float32)
-        tgt_pcd = torch.load(self.tgt_path).astype(np.float32)   
+      #  src_pcd = torch.load(self.src_path).astype(np.float32)
+      #  tgt_pcd = torch.load(self.tgt_path).astype(np.float32)
         
         
-        #src_pcd = o3d.io.read_point_cloud(self.src_path)
-        #tgt_pcd = o3d.io.read_point_cloud(self.tgt_path)
-        #src_pcd = src_pcd.voxel_down_sample(0.025)
-        #tgt_pcd = tgt_pcd.voxel_down_sample(0.025)
-        #src_pcd = np.array(src_pcd.points).astype(np.float32)
-        #tgt_pcd = np.array(tgt_pcd.points).astype(np.float32)
+        src_pcd = o3d.io.read_point_cloud(self.src_path)
+        tgt_pcd = o3d.io.read_point_cloud(self.tgt_path)
+        src_pcd = src_pcd.voxel_down_sample(0.025)
+        tgt_pcd = tgt_pcd.voxel_down_sample(0.025)
+        src_pcd = np.array(src_pcd.points).astype(np.float32)
+        tgt_pcd = np.array(tgt_pcd.points).astype(np.float32)
 
 
         src_feats=np.ones_like(src_pcd[:,:1]).astype(np.float32)
@@ -141,7 +141,7 @@ def draw_registration_result(src_raw, tgt_raw, src_overlap, tgt_overlap, src_sal
     vis3.destroy_window()    
 
 
-def main(config, demo_loader):
+def main(config, demo_loader, save_result_path, is_suppress_visualisation):
     config.model.eval()
     c_loader_iter = demo_loader.__iter__()
     with torch.no_grad():
@@ -188,13 +188,23 @@ def main(config, demo_loader):
         ########################################
         # run ransac and draw registration
         tsfm = ransac_pose_estimation(src_pcd, tgt_pcd, src_feats, tgt_feats, mutual=False)
-        draw_registration_result(src_raw, tgt_raw, src_overlap, tgt_overlap, src_saliency, tgt_saliency, tsfm)
+
+        with open(os.path.join(save_result_path, "result.txt"), 'w') as f:
+            for idx in range(tsfm.shape[0]):
+                for i in range(0, 4):
+                    f.write(str(tsfm[idx, i])+"\t")
+                f.write('\n')
+
+        if not is_suppress_visualisation:
+            draw_registration_result(src_raw, tgt_raw, src_overlap, tgt_overlap, src_saliency, tgt_saliency, tsfm)
 
 
 if __name__ == '__main__':
     # load configs
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, help= 'Path to the config file.')
+    parser.add_argument('--result', type=str, help= 'Path to save result.')
+    parser.add_argument('--suppress_visualisation', nargs='?', const="1", type=str, help= 'Suppress visualisation.')
     args = parser.parse_args()
     config = load_config(args.config)
     config = edict(config)
@@ -229,16 +239,21 @@ if __name__ == '__main__':
                                         shuffle=True,
                                         num_workers=config.num_workers,
                                         )
-    demo_loader, _ = get_dataloader(dataset=demo_set,
+    demo_loader, neighborhood_limits = get_dataloader(dataset=demo_set,
                                         batch_size=config.batch_size,
                                         shuffle=False,
                                         num_workers=1,
                                         neighborhood_limits=neighborhood_limits)
-
     # load pretrained weights
     assert config.pretrain != None
     state = torch.load(config.pretrain)
     config.model.load_state_dict(state['state_dict'])
 
     # do pose estimation
-    main(config, demo_loader)
+    if args.suppress_visualisation:
+        is_suppress_visualisation = True
+    else:
+        is_suppress_visualisation = False
+
+
+    main(config, demo_loader, args.result, is_suppress_visualisation)
